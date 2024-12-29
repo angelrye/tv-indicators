@@ -1,0 +1,75 @@
+//@version=6
+indicator("Runup Condition with Function and While Loop", overlay=true)
+
+// Define input for loopback period
+loopback = input.int(200, title="Loopback Period", minval=1)
+
+// Higher timeframe input
+higherTimeframe = input.timeframe("60", title="Higher Timeframe")
+
+// Define the EMAs, SMAs, and RSI for the higher timeframe
+ema19_htf = request.security(syminfo.tickerid, higherTimeframe, ta.ema(close, 19))
+sma50_htf = request.security(syminfo.tickerid, higherTimeframe, ta.sma(close, 50))
+rsi_htf = request.security(syminfo.tickerid, higherTimeframe, ta.rsi(close, 14))
+
+// Function to define the runup conditions
+f_runup_conditions(_close, _high, _low, _ema19_htf, _sma50_htf, _rsi_htf, _barIndex) =>
+    // Find the lowest low price within the last 24 candles
+    lowestLow = ta.lowest(_low[_barIndex], 24)
+
+    // Define the runup start condition
+    runupStartCondition = _low[_barIndex] == lowestLow and _close[_barIndex] < _ema19_htf and _rsi_htf <= 45
+
+    // Define the runup end condition
+    highestHigh = ta.highest(_high[_barIndex], 24)
+    runupEndCondition = _high[_barIndex] == highestHigh and _close[_barIndex] >= _sma50_htf and _rsi_htf >= 50 and _rsi_htf < 70 and _ema19_htf < _sma50_htf
+
+    [runupStartCondition, runupEndCondition]
+
+// Function to check runup conditions and clear previous plotshapes
+f_check_runup_conditions(_loopback, _close, _high, _low, _ema19_htf, _sma50_htf, _rsi_htf) =>
+    var float startPrice = na
+    var float endPrice = na
+    var int startBarIndex = na
+    var int endBarIndex = na
+    var bool previousRunupStartFound = false
+    var bool previousRunupEndFound = false
+
+    for i = 0 to _loopback - 1
+        [runupStartCondition, runupEndCondition] = f_runup_conditions(_close, _high, _low, _ema19_htf, _sma50_htf, _rsi_htf, i)
+
+        if (runupStartCondition and not previousRunupStartFound)
+            startPrice := _low[i]
+            startBarIndex := i
+            previousRunupStartFound := true
+
+        if (runupEndCondition and not previousRunupEndFound)
+            endPrice := _high[i]
+            endBarIndex := i
+            previousRunupEndFound := true
+
+        if (previousRunupStartFound and previousRunupEndFound)
+            break
+
+    [startPrice, endPrice, startBarIndex, endBarIndex]
+
+// Check runup conditions for historical bars
+[startPrice, endPrice, startBarIndex, endBarIndex] = f_check_runup_conditions(loopback, close, high, low, ema19_htf, sma50_htf, rsi_htf)
+
+// Check runup conditions for the current bar
+[runupStartCondition, runupEndCondition] = f_runup_conditions(close, high, low, ema19_htf, sma50_htf, rsi_htf, 0)
+
+if (runupStartCondition)
+    startPrice := low
+    startBarIndex := bar_index
+if (runupEndCondition)
+    endPrice := high
+    endBarIndex := bar_index
+
+// Transparent plotshapes for the previous conditions
+plotshape(series=na, location=location.belowbar, color=color.new(color.red, 100), style=shape.labeldown, text="")
+plotshape(series=na, location=location.abovebar, color=color.new(color.green, 100), style=shape.labelup, text="")
+
+// Plot signals for current runup start and end conditions
+plotshape(series=runupStartCondition and bar_index == startBarIndex, location=location.belowbar, color=color.red, style=shape.labeldown, text="Start")
+plotshape(series=runupEndCondition and bar_index == endBarIndex, location=location.abovebar, color=color.green, style=shape.labelup, text="End")
